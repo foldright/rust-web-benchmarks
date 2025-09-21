@@ -1,14 +1,18 @@
 use salvo::prelude::*;
 
 #[handler]
-fn hello() -> &'static str {
+async fn hello() -> &'static str {
     "Hello, World!"
 }
 
 #[tokio::main]
 async fn main() {
+
+    let acceptor = TcpListener::new("127.0.0.1:3000").bind().await;
+
     let router = Router::new().get(hello);
-    Server::new(TcpListener::bind("127.0.0.1:3000"))
+
+    Server::new(acceptor)
         .serve(router)
         .await
 }

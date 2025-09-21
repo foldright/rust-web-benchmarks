@@ -1,8 +1,10 @@
 [package]
 name = "hello-world-hyper"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-hyper = { version = "0.14", features = ["full"] }
+hyper = { version = "1.7", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+http-body-util = "0.1"
 tokio = { version = "1", features = ["full"] }

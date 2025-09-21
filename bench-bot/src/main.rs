@@ -13,7 +13,7 @@ use std::{
     thread,
     time::Duration,
 };
-use sysinfo::{CpuExt, PidExt, ProcessExt, System, SystemExt};
+use sysinfo::{Pid, Process, ProcessesToUpdate, System};
 use self::report::{Metrics, Report};
 
 mod markdown;
@@ -29,6 +29,10 @@ struct Args {
     /// Path to output file.
     #[clap(short)]
     output_dir: PathBuf,
+
+    /// Thread count of each benchmark.
+    #[clap(short)]
+    threads: Option<usize>,
 
     /// Connection count of each benchmark.
     #[clap(short, default_value = "500")]
@@ -63,7 +67,7 @@ fn main() {
     env_logger::builder()
         .format(|buf, record| {
             let ts = buf.timestamp();
-            let level = buf.default_styled_level(record.level());
+            let level = buf.default_level_style(record.level());
             writeln!(buf, "[{} {}] {}", ts, level, record.args())
         })
         .filter_module("bench_bot", LevelFilter::Info)
@@ -98,10 +102,11 @@ fn main() {
         }
     }
 
-    let sys = System::new_all();
+    let mut sys = System::new_all();
+    sys.refresh_all();
 
-    let cpu_name = sys.global_cpu_info().brand();
-    let cpu_count = sys.cpus().len().to_string();
+    let cpu_name = sys.cpus()[0].brand();
+    let threads = args.threads.unwrap_or(sys.cpus().len() / 2).to_string();
     let conn_count = args.connections.to_string();
     let duration = format!("{}s", args.duration);
     let cd = args.cd;
@@ -109,7 +114,7 @@ fn main() {
 
     let rewrk_args = [
         "-t",
-        &cpu_count,
+        &threads,
         "-c",
         &conn_count,
         "-d",
@@ -132,7 +137,7 @@ fn main() {
     base_md.add_item(cpu_name);
     base_md.add_item("# Benchmark");
     base_md.add_item("Command:");
-    base_md.add_item(format!("```\n{}\n```", bench_command));
+    base_md.add_item(format!("```sh\n{}\n```", bench_command));
 
     let mut output_map = HashMap::new();
     let mut reports = Vec::with_capacity(members.len());
@@ -161,28 +166,34 @@ fn main() {
                 .spawn()
                 .unwrap();
 
+            log::info!("Starting {:?}", member);
             thread::sleep(Duration::from_secs(1));
 
-            let pid = PidExt::from_u32(server.id());
+            let pid = Pid::from_u32(server.id());
             let (tx, rx) = mpsc::channel::<()>();
 
             let mem_usage_thread = thread::spawn(move || {
                 let mut sys = System::new();
                 let mut max_memory = 0;
                 while rx.try_recv().is_err() {
-                    sys.refresh_process(pid);
+                    sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
                     max_memory =
-                        max_memory.max(sys.process(pid).map(ProcessExt::memory).unwrap_or(0));
+                        max_memory.max(sys.process(pid).map(Process::memory).unwrap_or(0));
 
                     thread::sleep(Duration::from_millis(100));
                 }
                 max_memory
             });
 
+
+            log::info!("Starting rewrk {:?}", member);
             let output = Command::new("rewrk").args(rewrk_args).output().unwrap();
 
             tx.send(()).unwrap();
-            let _ = server.kill();
+            if let Err(e) = server.kill() {
+                log::error!("Kill {:?} error, {:?}", member, e);
+            }
+
             let max_memory = mem_usage_thread.join().unwrap();
             let max_memory =
                 f64::from(u32::try_from(max_memory).expect("mem usage too high")) / 1024.0;
@@ -227,6 +238,9 @@ fn main() {
         output_md.add_item(result_md.finish());
 
         let output_path = args.output_dir.join(format!("{}.md", bench_type));
+        if !output_path.parent().unwrap().exists() {
+            fs::create_dir_all(output_path.parent().unwrap()).unwrap();
+        }
 
         log::info!("Writing output to {:?}.", output_path);
         fs::write(output_path, output_md.finish()).unwrap();

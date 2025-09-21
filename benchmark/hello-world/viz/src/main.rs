@@ -1,7 +1,8 @@
 #![deny(warnings)]
 
 use std::net::SocketAddr;
-use viz::{get, Request, Result, Router, Server, ServiceMaker, Error};
+use tokio::net::TcpListener;
+use viz::{get, Request, Result, Router, serve};
 
 async fn index(_: Request) -> Result<&'static str> {
     Ok("Hello, World!")
@@ -10,11 +11,12 @@ async fn index(_: Request) -> Result<&'static str> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let listener = TcpListener::bind(addr).await?;
     let app = Router::new().route("/", get(index));
 
-    Server::bind(&addr)
-        .tcp_nodelay(true)
-        .serve(ServiceMaker::from(app))
-        .await
-        .map_err(Error::normal)
+    if let Err(e) = serve(listener, app).await {
+        println!("{e}");
+    }
+
+    Ok(())
 }

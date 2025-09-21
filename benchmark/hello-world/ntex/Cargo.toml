@@ -2,7 +2,7 @@
 name = "hello-world-ntex"
 version = "0.1.0"
 authors = ["smallfish <smallfish.xy@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-ntex = { version = "0.5", features = ["tokio"] }
+ntex = { version = "2.16", features = ["tokio"] }
